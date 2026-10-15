@@ -1,0 +1,72 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "YouTube Mini Player",
+  "version": "0.1.0",
+  "identifier": "com.miniplayer.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "YouTube Mini Player",
+        "width": 448,
+        "height": 252,
+        "minWidth": 280,
+        "minHeight": 157,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "resizable": true,
+        "shadow": true,
+        "center": false,
+        "dragDropEnabled": false
+      },
+      {
+        "label": "quick-add",
+        "title": "Adicionar Vídeo",
+        "width": 420,
+        "height": 190,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "visible": false,
+        "shadow": true,
+        "center": true,
+        "url": "index.html?window=quick-add",
+        "dragDropEnabled": false
+      },
+      {
+        "label": "auth",
+        "title": "Sessão & Login de Navegadores",
+        "width": 480,
+        "height": 520,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "visible": false,
+        "shadow": true,
+        "center": true,
+        "url": "index.html?window=auth",
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
