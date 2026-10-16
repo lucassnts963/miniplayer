@@ -475,17 +475,387 @@ fn close_quick_add(app: AppHandle) -> Result<(), String> {
     }
 }
 
+#[cfg(target_os = "windows")]
+mod win_native {
+    use std::ffi::c_void;
+    use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+
+    #[repr(C)]
+    struct RECT {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    }
+
+    const GWLP_WNDPROC: i32 = -4;
+    const GCLP_HBRBACKGROUND: i32 = -10;
+    const BLACK_BRUSH: i32 = 4;
+    const WM_SIZE: u32 = 0x0005;
+    const WM_ERASEBKGND: u32 = 0x0014;
+    const WM_NCLBUTTONDOWN: u32 = 0x00A1;
+    const WM_SIZING: u32 = 0x0214;
+    const GW_CHILD: u32 = 5;
+    const SWP_NOZORDER: u32 = 0x0004;
+    const SWP_NOACTIVATE: u32 = 0x0010;
+    const SWP_NOCOPYBITS: u32 = 0x0100;
+    const HTLEFT: usize = 10;
+    const HTRIGHT: usize = 11;
+    const HTTOP: usize = 12;
+    const HTTOPLEFT: usize = 13;
+    const HTTOPRIGHT: usize = 14;
+    const HTBOTTOM: usize = 15;
+    const HTBOTTOMLEFT: usize = 16;
+    const HTBOTTOMRIGHT: usize = 17;
+    const WMSZ_LEFT: usize = 1;
+    const WMSZ_RIGHT: usize = 2;
+    const WMSZ_TOP: usize = 3;
+    const WMSZ_TOPLEFT: usize = 4;
+    const WMSZ_TOPRIGHT: usize = 5;
+    const WMSZ_BOTTOM: usize = 6;
+    const WMSZ_BOTTOMLEFT: usize = 7;
+    const WMSZ_BOTTOMRIGHT: usize = 8;
+
+    const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+    const DWMWCP_ROUND: u32 = 2;
+    const DWMWA_BORDER_COLOR: u32 = 34;
+    const DWMWA_COLOR_NONE: u32 = 0xFFFFFFFE;
+
+    const ASPECT_RATIO: f64 = 16.0 / 9.0;
+    const MIN_W: i32 = 288;
+    const MIN_H: i32 = 162;
+
+    static PREV_WNDPROC: AtomicIsize = AtomicIsize::new(0);
+    static PREV_CHILD_WNDPROC: AtomicIsize = AtomicIsize::new(0);
+    pub static IS_FULLSCREEN: AtomicBool = AtomicBool::new(false);
+
+    type WndProc = unsafe extern "system" fn(
+        hwnd: *mut c_void,
+        msg: u32,
+        wparam: usize,
+        lparam: isize,
+    ) -> isize;
+
+    type EnumChildProc = unsafe extern "system" fn(hwnd: *mut c_void, lparam: isize) -> i32;
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn SetWindowLongPtrW(hwnd: *mut c_void, index: i32, new_long: isize) -> isize;
+        fn SetClassLongPtrW(hwnd: *mut c_void, index: i32, new_long: isize) -> usize;
+        fn CallWindowProcW(
+            prev_wnd_func: WndProc,
+            hwnd: *mut c_void,
+            msg: u32,
+            wparam: usize,
+            lparam: isize,
+        ) -> isize;
+        fn GetClientRect(hwnd: *mut c_void, lp_rect: *mut RECT) -> i32;
+        fn FillRect(hdc: *mut c_void, lprc: *const RECT, hbr: *mut c_void) -> i32;
+        fn EnumChildWindows(hwnd_parent: *mut c_void, lp_enum_func: EnumChildProc, lparam: isize) -> i32;
+        fn GetWindow(hwnd: *mut c_void, u_cmd: u32) -> *mut c_void;
+        fn SetWindowPos(
+            hwnd: *mut c_void,
+            hwnd_insert_after: *mut c_void,
+            x: i32,
+            y: i32,
+            cx: i32,
+            cy: i32,
+            u_flags: u32,
+        ) -> i32;
+        fn ReleaseCapture() -> i32;
+        fn PostMessageW(hwnd: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> i32;
+    }
+
+    #[link(name = "gdi32")]
+    unsafe extern "system" {
+        fn GetStockObject(i: i32) -> *mut c_void;
+    }
+
+    #[link(name = "dwmapi")]
+    unsafe extern "system" {
+        fn DwmSetWindowAttribute(
+            hwnd: *mut c_void,
+            dw_attribute: u32,
+            pv_attribute: *const c_void,
+            cb_attribute: u32,
+        ) -> i32;
+    }
+
+    unsafe extern "system" fn set_child_black_brush(child_hwnd: *mut c_void, _lparam: isize) -> i32 {
+        unsafe {
+            let black_brush = GetStockObject(BLACK_BRUSH);
+            let _ = SetClassLongPtrW(child_hwnd, GCLP_HBRBACKGROUND, black_brush as isize);
+        }
+        1
+    }
+
+    pub fn start_resize(window: &tauri::WebviewWindow, direction: &str) -> Result<(), String> {
+        let ht = match direction {
+            "North" | "n" => HTTOP,
+            "South" | "s" => HTBOTTOM,
+            "East" | "e" => HTRIGHT,
+            "West" | "w" => HTLEFT,
+            "NorthEast" | "ne" => HTTOPRIGHT,
+            "NorthWest" | "nw" => HTTOPLEFT,
+            "SouthEast" | "se" => HTBOTTOMRIGHT,
+            "SouthWest" | "sw" => HTBOTTOMLEFT,
+            _ => return Err("Direção inválida".into()),
+        };
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+        let raw_hwnd = hwnd.0 as *mut c_void;
+        unsafe {
+            let _ = EnumChildWindows(raw_hwnd, set_child_black_brush, 0);
+            let _ = ReleaseCapture();
+            let _ = PostMessageW(raw_hwnd, WM_NCLBUTTONDOWN, ht, 0);
+        }
+        Ok(())
+    }
+
+    fn apply_aspect_to_rect(rect: &mut RECT, wparam: usize) {
+        let raw_w = (rect.right - rect.left).max(MIN_W);
+        let raw_h = (rect.bottom - rect.top).max(MIN_H);
+
+        let (mut new_w, mut new_h) = match wparam {
+            WMSZ_LEFT | WMSZ_RIGHT => {
+                let w = raw_w;
+                let h = ((w as f64) / ASPECT_RATIO).round() as i32;
+                (w, h)
+            }
+            WMSZ_TOP | WMSZ_BOTTOM => {
+                let h = raw_h;
+                let w = ((h as f64) * ASPECT_RATIO).round() as i32;
+                (w, h)
+            }
+            WMSZ_TOPLEFT | WMSZ_TOPRIGHT | WMSZ_BOTTOMLEFT | WMSZ_BOTTOMRIGHT => {
+                // Projeção contínua sem oscilação entre largura e altura
+                let target_w = ((raw_w as f64) + (raw_h as f64) * ASPECT_RATIO) * 0.5;
+                let w = target_w.round() as i32;
+                let h = (target_w / ASPECT_RATIO).round() as i32;
+                (w, h)
+            }
+            _ => (raw_w, ((raw_w as f64) / ASPECT_RATIO).round() as i32),
+        };
+
+        if new_w < MIN_W || new_h < MIN_H {
+            new_w = MIN_W;
+            new_h = MIN_H;
+        }
+
+        match wparam {
+            WMSZ_LEFT => {
+                rect.left = rect.right - new_w;
+                rect.bottom = rect.top + new_h;
+            }
+            WMSZ_RIGHT => {
+                rect.right = rect.left + new_w;
+                rect.bottom = rect.top + new_h;
+            }
+            WMSZ_TOP => {
+                rect.top = rect.bottom - new_h;
+                rect.left = rect.right - new_w;
+            }
+            WMSZ_BOTTOM => {
+                rect.bottom = rect.top + new_h;
+                rect.left = rect.right - new_w;
+            }
+            WMSZ_TOPLEFT => {
+                rect.left = rect.right - new_w;
+                rect.top = rect.bottom - new_h;
+            }
+            WMSZ_TOPRIGHT => {
+                rect.right = rect.left + new_w;
+                rect.top = rect.bottom - new_h;
+            }
+            WMSZ_BOTTOMLEFT => {
+                rect.left = rect.right - new_w;
+                rect.bottom = rect.top + new_h;
+            }
+            WMSZ_BOTTOMRIGHT | _ => {
+                rect.right = rect.left + new_w;
+                rect.bottom = rect.top + new_h;
+            }
+        }
+    }
+
+    unsafe extern "system" fn aspect_wndproc(
+        hwnd: *mut c_void,
+        msg: u32,
+        wparam: usize,
+        lparam: isize,
+    ) -> isize {
+        let prev_ptr = PREV_WNDPROC.load(Ordering::Relaxed);
+        if prev_ptr == 0 {
+            return 0;
+        }
+        let prev: WndProc = unsafe { std::mem::transmute(prev_ptr) };
+
+        if msg == WM_ERASEBKGND {
+            unsafe {
+                let mut rc = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+                if GetClientRect(hwnd, &mut rc) != 0 && wparam != 0 {
+                    let black_brush = GetStockObject(BLACK_BRUSH);
+                    let _ = FillRect(wparam as *mut c_void, &rc, black_brush);
+                }
+            }
+            return 1;
+        }
+
+        if msg == WM_SIZE {
+            let width = (lparam & 0xFFFF) as i32;
+            let height = ((lparam >> 16) & 0xFFFF) as i32;
+            if width > 0 && height > 0 {
+                unsafe {
+                    let child = GetWindow(hwnd, GW_CHILD);
+                    if !child.is_null() {
+                        let _ = SetWindowPos(
+                            child,
+                            std::ptr::null_mut(),
+                            0,
+                            0,
+                            width,
+                            height,
+                            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS,
+                        );
+                    }
+                }
+            }
+        }
+
+        if msg == WM_SIZING && !IS_FULLSCREEN.load(Ordering::Relaxed) && lparam != 0 {
+            let rect = unsafe { &mut *(lparam as *mut RECT) };
+            apply_aspect_to_rect(rect, wparam);
+            return 1;
+        }
+
+        unsafe { CallWindowProcW(prev, hwnd, msg, wparam, lparam) }
+    }
+
+    unsafe extern "system" fn child_wndproc(
+        hwnd: *mut c_void,
+        msg: u32,
+        wparam: usize,
+        lparam: isize,
+    ) -> isize {
+        let prev_ptr = PREV_CHILD_WNDPROC.load(Ordering::Relaxed);
+        if prev_ptr == 0 {
+            return 0;
+        }
+        let prev: WndProc = unsafe { std::mem::transmute(prev_ptr) };
+
+        if msg == WM_ERASEBKGND {
+            unsafe {
+                let mut rc = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+                if GetClientRect(hwnd, &mut rc) != 0 && wparam != 0 {
+                    let black_brush = GetStockObject(BLACK_BRUSH);
+                    let _ = FillRect(wparam as *mut c_void, &rc, black_brush);
+                }
+            }
+            return 1;
+        }
+
+        unsafe { CallWindowProcW(prev, hwnd, msg, wparam, lparam) }
+    }
+
+    pub fn install_window_hooks(window: &tauri::WebviewWindow) {
+        let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 255)));
+        if let Ok(hwnd) = window.hwnd() {
+            let raw_hwnd = hwnd.0 as *mut c_void;
+            unsafe {
+                // Define fundo preto nativo (BLACK_BRUSH) na janela principal e todas as janelas filhas (WebView2)
+                let black_brush = GetStockObject(BLACK_BRUSH);
+                let _ = SetClassLongPtrW(raw_hwnd, GCLP_HBRBACKGROUND, black_brush as isize);
+                let _ = EnumChildWindows(raw_hwnd, set_child_black_brush, 0);
+
+                // Configura cantos arredondados nativos do Windows 11 e remove a borda DWM de 1px
+                let corner_pref: u32 = DWMWCP_ROUND;
+                let _ = DwmSetWindowAttribute(
+                    raw_hwnd,
+                    DWMWA_WINDOW_CORNER_PREFERENCE,
+                    &corner_pref as *const u32 as *const c_void,
+                    std::mem::size_of::<u32>() as u32,
+                );
+                let border_none: u32 = DWMWA_COLOR_NONE;
+                let _ = DwmSetWindowAttribute(
+                    raw_hwnd,
+                    DWMWA_BORDER_COLOR,
+                    &border_none as *const u32 as *const c_void,
+                    std::mem::size_of::<u32>() as u32,
+                );
+
+                // Instala hook de WM_SIZING na janela principal
+                if PREV_WNDPROC.load(Ordering::Relaxed) == 0 {
+                    let prev = SetWindowLongPtrW(
+                        raw_hwnd,
+                        GWLP_WNDPROC,
+                        aspect_wndproc as *const () as isize,
+                    );
+                    if prev != 0 {
+                        PREV_WNDPROC.store(prev, Ordering::Relaxed);
+                    }
+                }
+
+                // Instala hook de WM_ERASEBKGND na janela filha direta (WRY_WEBVIEW)
+                let child = GetWindow(raw_hwnd, GW_CHILD);
+                if !child.is_null() && PREV_CHILD_WNDPROC.load(Ordering::Relaxed) == 0 {
+                    let prev_c = SetWindowLongPtrW(
+                        child,
+                        GWLP_WNDPROC,
+                        child_wndproc as *const () as isize,
+                    );
+                    if prev_c != 0 {
+                        PREV_CHILD_WNDPROC.store(prev_c, Ordering::Relaxed);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn apply_borderless_rounded(window: &tauri::WebviewWindow) {
+        let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 255)));
+        if let Ok(hwnd) = window.hwnd() {
+            let raw_hwnd = hwnd.0 as *mut c_void;
+            unsafe {
+                let black_brush = GetStockObject(BLACK_BRUSH);
+                let _ = SetClassLongPtrW(raw_hwnd, GCLP_HBRBACKGROUND, black_brush as isize);
+                let _ = EnumChildWindows(raw_hwnd, set_child_black_brush, 0);
+
+                let corner_pref: u32 = DWMWCP_ROUND;
+                let _ = DwmSetWindowAttribute(
+                    raw_hwnd,
+                    DWMWA_WINDOW_CORNER_PREFERENCE,
+                    &corner_pref as *const u32 as *const c_void,
+                    std::mem::size_of::<u32>() as u32,
+                );
+                let border_none: u32 = DWMWA_COLOR_NONE;
+                let _ = DwmSetWindowAttribute(
+                    raw_hwnd,
+                    DWMWA_BORDER_COLOR,
+                    &border_none as *const u32 as *const c_void,
+                    std::mem::size_of::<u32>() as u32,
+                );
+            }
+        }
+    }
+}
+
 #[tauri::command]
 fn set_window_preset(app: AppHandle, preset: String) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         let (w, h) = match preset.as_str() {
-            "small" => (360.0, 202.0),
+            "small" => (352.0, 198.0),
             "medium" => (448.0, 252.0),
             "large" => (640.0, 360.0),
             "xlarge" => (800.0, 450.0),
             _ => (448.0, 252.0),
         };
+        let old_pos = window.outer_position().ok();
+        let old_size = window.outer_size().ok();
         window.set_size(LogicalSize::new(w, h)).map_err(|e| e.to_string())?;
+        if let (Some(pos), Some(old_s), Ok(new_s)) = (old_pos, old_size, window.outer_size()) {
+            let right_anchor = pos.x + old_s.width as i32;
+            let new_x = (right_anchor - new_s.width as i32).max(0);
+            let _ = window.set_position(tauri::PhysicalPosition::new(new_x, pos.y));
+        }
         Ok(())
     } else {
         Err("Janela principal não encontrada".into())
@@ -527,6 +897,19 @@ fn start_window_dragging(window: tauri::WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn start_window_resize(window: tauri::WebviewWindow, direction: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        win_native::start_resize(&window, &direction)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, direction);
+        Ok(())
+    }
+}
+
+#[tauri::command]
 fn set_window_position_offset(window: tauri::WebviewWindow, dx: i32, dy: i32) -> Result<(), String> {
     let current_pos = window.outer_position().map_err(|e| e.to_string())?;
     window.set_position(tauri::PhysicalPosition::new(current_pos.x + dx, current_pos.y + dy)).map_err(|e| e.to_string())
@@ -537,6 +920,8 @@ fn toggle_fullscreen(app: AppHandle) -> Result<bool, String> {
     if let Some(window) = app.get_webview_window("main") {
         let is_fs = window.is_fullscreen().map_err(|e| e.to_string())?;
         let next = !is_fs;
+        #[cfg(target_os = "windows")]
+        win_native::IS_FULLSCREEN.store(next, std::sync::atomic::Ordering::Relaxed);
         window.set_fullscreen(next).map_err(|e| e.to_string())?;
         Ok(next)
     } else {
@@ -584,6 +969,19 @@ pub fn run() {
             let handle = app.handle().clone();
             let _ = position_bottom_right(handle.clone());
 
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(main_win) = app.get_webview_window("main") {
+                    win_native::install_window_hooks(&main_win);
+                }
+                if let Some(quick_win) = app.get_webview_window("quick-add") {
+                    win_native::apply_borderless_rounded(&quick_win);
+                }
+                if let Some(auth_win) = app.get_webview_window("auth") {
+                    win_native::apply_borderless_rounded(&auth_win);
+                }
+            }
+
             // Registra atalhos globais padrão
             let global_shortcut = app.global_shortcut();
             let shortcuts = ["Ctrl+Shift+Space", "Ctrl+Shift+A", "Ctrl+Shift+Right", "Ctrl+Shift+Left", "Ctrl+Shift+T"];
@@ -612,6 +1010,7 @@ pub fn run() {
             position_bottom_right,
             minimize_player,
             start_window_dragging,
+            start_window_resize,
             set_window_position_offset,
             toggle_fullscreen,
             close_app,
@@ -625,3 +1024,4 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+

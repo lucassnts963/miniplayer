@@ -16,13 +16,14 @@
         "title": "YouTube Mini Player",
         "width": 448,
         "height": 252,
-        "minWidth": 280,
-        "minHeight": 157,
+        "minWidth": 288,
+        "minHeight": 162,
         "decorations": false,
         "alwaysOnTop": true,
         "resizable": true,
         "shadow": true,
         "center": false,
+        "backgroundColor": "#000000",
         "dragDropEnabled": false
       },
       {
@@ -36,6 +37,7 @@
         "visible": false,
         "shadow": true,
         "center": true,
+        "backgroundColor": "#000000",
         "url": "index.html?window=quick-add",
         "dragDropEnabled": false
       },
@@ -50,6 +52,7 @@
         "visible": false,
         "shadow": true,
         "center": true,
+        "backgroundColor": "#0d0f12",
         "url": "index.html?window=auth",
         "dragDropEnabled": false
       }

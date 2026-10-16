@@ -123,6 +123,20 @@ export const nativeService = {
     }
   },
 
+  async startResizeDragging(direction: 'North' | 'South' | 'East' | 'West' | 'NorthEast' | 'NorthWest' | 'SouthEast' | 'SouthWest'): Promise<void> {
+    if (!isTauriEnvironment()) return;
+    try {
+      await invoke('start_window_resize', { direction });
+    } catch {
+      try {
+        const appWindow = getCurrentWindow();
+        await appWindow.startResizeDragging(direction);
+      } catch (e) {
+        console.warn('Erro ao redimensionar janela:', e);
+      }
+    }
+  },
+
   async setWindowPositionOffset(dx: number, dy: number): Promise<void> {
     if (!isTauriEnvironment()) return;
     try {

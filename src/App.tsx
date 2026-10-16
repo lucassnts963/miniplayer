@@ -38,8 +38,28 @@ export function App() {
     nativeService.closeApp();
   };
 
+  const handleResizeMouseDown = (
+    e: React.MouseEvent,
+    direction: 'North' | 'South' | 'East' | 'West' | 'NorthEast' | 'NorthWest' | 'SouthEast' | 'SouthWest'
+  ) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    nativeService.startResizeDragging(direction);
+  };
+
   return (
-    <div className="app-container">
+    <div className={`app-container ${isPlayerActive ? 'player-mode' : 'form-mode'}`}>
+      {/* Zonas de redimensionamento proporcional nas bordas e cantos */}
+      <div className="window-resize-handle n" onMouseDown={(e) => handleResizeMouseDown(e, 'North')} />
+      <div className="window-resize-handle s" onMouseDown={(e) => handleResizeMouseDown(e, 'South')} />
+      <div className="window-resize-handle e" onMouseDown={(e) => handleResizeMouseDown(e, 'East')} />
+      <div className="window-resize-handle w" onMouseDown={(e) => handleResizeMouseDown(e, 'West')} />
+      <div className="window-resize-handle nw" onMouseDown={(e) => handleResizeMouseDown(e, 'NorthWest')} />
+      <div className="window-resize-handle ne" onMouseDown={(e) => handleResizeMouseDown(e, 'NorthEast')} />
+      <div className="window-resize-handle sw" onMouseDown={(e) => handleResizeMouseDown(e, 'SouthWest')} />
+      <div className="window-resize-handle se" onMouseDown={(e) => handleResizeMouseDown(e, 'SouthEast')} />
+
       <Toast message={toastMessage} onDismiss={hideToast} />
 
       {isPlayerActive ? (
